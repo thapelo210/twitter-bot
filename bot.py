@@ -1,23 +1,25 @@
 # bot.py
+import os
 import tweepy
-from transformers import pipeline
 import schedule
 import time
-import os
+import threading
+from flask import Flask
+import openai
+from dotenv import load_dotenv
 
-API_KEY = os.environ["API_KEY"]
-API_SECRET = os.environ["API_SECRET"]
-ACCESS_TOKEN = os.environ["ACCESS_TOKEN"]
-ACCESS_SECRET = os.environ["ACCESS_SECRET"]
+# Load environment variables from .env
+load_dotenv()
 
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("API_SECRET")
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
+ACCESS_SECRET = os.getenv("ACCESS_SECRET")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# ==== Twitter API Keys (v2) ====
-API_KEY = "rX3VkYdvXtLolPZtpbNIMlaoL"
-API_SECRET = "77WqRnVLGos6fX3173X6t8kZ4GBv7YOo3i3CgQ0z5iXy9IKsCK"
-ACCESS_TOKEN = "1972573302553214976-7qMkAPzZXvnSpAfsoH2z8TfWBCtikh"
-ACCESS_SECRET = "LQRXmEOXbssfPxkYJXn0dtbioLVgs8H4MPXTZLQUJfiAc"
+openai.api_key = OPENAI_API_KEY
 
-# Setup Tweepy Client for v2
+# Setup Twitter Client (v2)
 client = tweepy.Client(
     consumer_key=API_KEY,
     consumer_secret=API_SECRET,
@@ -25,35 +27,54 @@ client = tweepy.Client(
     access_token_secret=ACCESS_SECRET
 )
 
-# Load GPT-2 locally
-generator = pipeline("text-generation", model="gpt2")
-
+# Generate a short positive tweet using ChatGPT API
 def generate_message():
-    prompt = "Write a short positive motivational message for Twitter:"
-    outputs = generator(
-        prompt,
-        max_new_tokens=40,
-        temperature=0.9,
-        top_p=0.95,
-        do_sample=True
-    )
-    return outputs[0]["generated_text"].replace(prompt, "").strip()
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that writes positive motivational tweets."},
+                {"role": "user", "content": "Write a short, catchy, positive motivational tweet under 280 characters."}
+            ],
+            temperature=0.8,
+            max_tokens=60
+        )
+        text = response['choices'][0]['message']['content'].strip()
+        return text[:280]
+    except Exception as e:
+        print(f"❌ OpenAI API error: {e}")
+        return "Stay positive and keep moving forward! 💪"
 
+# Tweet the generated message
 def tweet_message():
-    msg = generate_message()[:250]  # Twitter limit
+    msg = generate_message()
     try:
         client.create_tweet(text=msg)
         print(f"✅ Tweeted: {msg}")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Twitter API error: {e}")
 
 # Schedule: run every hour
 schedule.every().hour.do(tweet_message)
 
-# Optional: run once immediately
+# Tweet once immediately
 tweet_message()
 
+# Flask server to keep online (if needed for hosting)
+app = Flask("")
+
+@app.route("/")
+def home():
+    return "Bot is alive!"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=8080)
+
+threading.Thread(target=run_flask).start()
+
 print("🚀 Bot started... tweeting every hour")
+
+# Main loop
 while True:
     schedule.run_pending()
     time.sleep(1)
